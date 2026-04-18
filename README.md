@@ -169,4 +169,4 @@ Rashmita Kudamala, Aravind Kuruvikkattil Venugopalan, Saptarshi Purkayastha
 
 If you use this code or build upon this work, please cite:
 
-Kudamala R, Kuruvikkattil Venugopalan A, Purkayastha S. Transfer learning for ESBL prediction across hospitals using electronic health records. npj Digital Medicine (under review).
+Kudamala R, Kuruvikkattil Venugopalan A, Purkayastha S. Transfer learning for ESBL prediction across hospitals using electronic health records.

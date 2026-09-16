@@ -1,8 +1,8 @@
 # Transfer Learning for Cross-Site ESBL Prediction from Electronic Health Records
 
-*Pipeline for bidirectional cross-site transfer learning of ESBL risk prediction across two US academic medical centers (Mass General Brigham, Stanford Health Care).*
+*Bidirectional cross-site transfer learning of presumptive-ESBL risk prediction across two US academic medical centers (Mass General Brigham and Stanford Health Care), using the public Antibiotic Resistance Microbiology Dataset (ARMD).*
 
-This repository contains the analysis notebook, figures, and reproduction instructions for the npj Digital Medicine submission:
+This repository contains the analysis notebook, generated figures and reproduction instructions for:
 
 **Bidirectional cross-site transfer learning for prediction of extended-spectrum beta-lactamase-producing Enterobacterales from electronic health records**
 Rashmita Kudamala¹, Aravind V. Kuruvikkattil¹, Judy W. Gichoya², Saptarshi Purkayastha¹
@@ -15,106 +15,92 @@ Rashmita Kudamala¹, Aravind V. Kuruvikkattil¹, Judy W. Gichoya², Saptarshi Pu
 ## Contents
 
 - [Overview](#overview)
-- [Key Findings](#key-findings)
+- [Key findings](#key-findings)
 - [What this repository is and is not](#what-this-repository-is-and-is-not)
 - [Dataset](#dataset)
-- [Features extracted](#features-extracted)
-- [ESBL outcome definition](#esbl-outcome-definition)
+- [Outcome definition](#outcome-definition)
+- [Features](#features)
+- [Analysis design](#analysis-design)
 - [Repository structure](#repository-structure)
 - [Environment setup](#environment-setup)
 - [Reproducing results](#reproducing-results)
 - [License and citation](#license-and-citation)
-- [Contact](#contact)
 
 ---
 
 ## Overview
 
-This project investigates whether EHR-based models for predicting ESBL-producing Enterobacterales can be transferred across hospital systems without requiring full local retraining.
+Can an EHR-based model for presumptive ESBL-producing Enterobacterales, trained at one hospital system, be used at another with little or no local labelled data? Using ARMD-MGB and ARMD-Stanford we
 
-Using the Antibiotic Resistance Microbiology Dataset (ARMD) from two US academic medical centers, we:
+1. build one harmonised 46-feature representation with the same code at both sites;
+2. evaluate seven architectures (L1 logistic regression, XGBoost, FT-Transformer, MHCA-VAE, DA-VAE, FTT-DANN, TabPFN 2.6) in bidirectional zero-shot external validation at natural prevalence;
+3. measure fine-tuning data efficiency over repeated random target subsamples of 500 to 5,000 cultures, against XGBoost trained from scratch or warm-started from the source model;
+4. test whether domain-adversarial alignment helps or hurts, including its seed-to-seed stability;
+5. characterise calibration, subgroup performance, a clinical operating point and several sensitivity analyses, with patient-cluster bootstrap confidence intervals throughout.
 
-1. Engineer 48 harmonized clinical features from electronic health records at both sites.
-2. Train and evaluate seven model architectures in true bidirectional external validation at natural ESBL prevalence.
-3. Analyze fine-tuning data efficiency — how many target-site cultures are needed for effective deployment.
-4. Test whether domain-adversarial alignment improves or harms cross-site transfer.
-5. Characterize model performance across clinically relevant patient subgroups.
-
-The repository provides the complete modeling pipeline needed to reproduce all reported results and figures.
+Everything reported in the manuscript is produced by a single notebook executed end to end.
 
 ---
 
-## Key Findings
+## Key findings
 
-In a bidirectional external validation study using 133,084 MGB cultures (14.4% ESBL-positive) and 83,373 Stanford cultures (10.4% ESBL-positive), a pre-trained FT-Transformer fine-tuned on only 500 target-site cultures outperformed XGBoost retrained from scratch at the same 500-sample budget by +0.026 AUROC. Five hundred cultures correspond to roughly 2–3 weeks of Enterobacterales collection at a medium-volume clinical microbiology lab. At full target-site data, XGBoost matched or slightly exceeded neural models (e.g. Stanford→MGB ALL: XGBoost 0.803 vs FTT 0.796), so the advantage of pre-trained neural transfer is one of *data efficiency* rather than higher discrimination at saturation — most valuable when target-site labels are scarce.
+In a bidirectional external validation on 120,742 MGB cultures (13.8% presumptive ESBL by CLSI screening criteria) and 76,244 Stanford cultures (9.2%), with 46 features harmonised to what is known at the preliminary culture report:
 
-Domain-adversarial training (FTT-DANN) was counterproductive: gradient-reversal-layer instability produced AUROC ranging 0.67–0.72 across identical zero-shot runs, with no consistent advantage over standard FTT at any fine-tuning budget. This reflects a fundamental mismatch between domain-adaptation assumptions and AMR biology — the site effect in resistance prediction is clinical signal, not noise, and erasing it harms performance.
-
-Seven of ten top permutation-importance features were consistent across both transfer directions, supporting a minimal shared feature set for deployment. A 10-feature model preserved Stanford→MGB performance (ΔAUROC −0.011). At 90% sensitivity, negative predictive value exceeded 94% in both directions, supporting empiric carbapenem de-escalation decisions for screen-negative patients.
+- **Zero-shot transfer is nearly architecture-independent.** AUROC spanned 0.710–0.740 (MGB→Stanford) and 0.741–0.752 (Stanford→MGB) with overlapping patient-cluster bootstrap intervals; L1 logistic regression was within 0.022 and 0.006 of the best model.
+- **Data efficiency comes from pre-training, not from the architecture.** Fine-tuned on 500 target cultures, the FT-Transformer beat XGBoost trained from scratch by +0.113 [+0.100, +0.126] and +0.054 [+0.046, +0.060] AUROC (ten random subsamples), but a warm-started XGBoost by only +0.006 in either direction. With the full target cohort, locally trained XGBoost matched the neural models in one direction and came within 0.014 in the other.
+- **Domain-adversarial alignment did not help** and showed larger seed-to-seed spread (FTT-DANN 0.712–0.742 across five seeds in MGB→Stanford versus 0.721–0.743 for the plain FT-Transformer).
+- **Calibration differences vanish when models are calibrated alike:** after one isotonic step fitted on source data all seven models reach the same Brier score; only TabPFN (natural-prevalence context) is calibrated without post-processing.
+- **Prior microbiology is the transferable signal.** On first cultures (no in-system history) AUROC drops to 0.59–0.64; source-selected 10-feature models lose 0.02–0.03 AUROC zero-shot and the 5 cross-direction stable features alone lose 0.04.
+- **Operating point:** a source-derived 90%-sensitivity threshold realised sensitivity 82.1% / 90.8% and NPV 95.9% / 94.7% (no-model NPV 90.8% / 86.2%); a screening characteristic requiring prospective validation, not evidence for de-escalation.
 
 ---
 
 ## What this repository is and is not
 
-**This repository contains:**
-- The complete analysis notebook (with cell outputs preserved).
-- All main and supplementary figures.
-- Configuration and reproduction instructions.
+**This repository contains**
+- `cross_site_esbl_prediction.ipynb`: the complete analysis, with cell outputs from the reported run.
+- `figures/`: every main and supplementary figure of the manuscript, as written by the notebook.
+- `requirements.txt`: the pinned package versions of the reported run.
 
-**This repository does NOT contain:**
-- Patient-level data (both ARMD datasets are credentialed access).
-- Trained model weights or checkpoints.
-- A deployment-ready API or clinical decision support system.
-
-For the underlying datasets see [Dataset](#dataset) below. The work is intended for research reproduction and methodological reference; any clinical deployment would require local retraining/fine-tuning, post-hoc calibration, prospective validation, and institutional governance not addressed here.
+**This repository does not contain**
+- Any patient data. ARMD must be obtained from PhysioNet (MGB) and Dryad (Stanford) under their data use agreements.
+- Trained model weights or predictions (they are derived from the data).
 
 ---
 
 ## Dataset
 
-The original study was conducted using the Antibiotic Resistance Microbiology Dataset (ARMD):
+| Site | Source | Access |
+|---|---|---|
+| ARMD-MGB (Mass General Brigham) | https://physionet.org/content/armd-mgb/ | PhysioNet credentialed access |
+| ARMD-Stanford (Stanford Health Care) | https://doi.org/10.5061/dryad.jq2bvq8kp | Dryad, data use agreement |
 
-- **ARMD-MGB** (Mass General Brigham) — PhysioNet, credentialed access required.
-  https://physionet.org/content/armd-mgb/
-- **ARMD-Stanford** (Stanford Health Care) — Dryad, credentialed access required.
-  https://doi.org/10.5061/dryad.jq2bvq8kp
+Set the two directories at the top of the notebook (`MGB_DIR`, `STANFORD_DIR`). The Stanford comorbidity table (about 20 GB as CSV) is read from a parquet mirror; the notebook expects `<STANFORD_DIR>/parquet/comorbidity/*.parquet` with the same columns as the CSV (convert once with pyarrow).
 
-Both datasets are fully de-identified and require a completed data use agreement before download. No patient-level data are included in this repository, and all analyses must be executed within a secure environment under the respective ARMD DUAs.
-
-Researchers wishing to reproduce the analysis should obtain access to both ARMD datasets and update the data paths at the top of the notebook:
-
-```python
-MGB_DIR      = "/path/to/armd-mgb"
-STANFORD_DIR = "/path/to/armd-stanford"
-```
+Cohort: adult cultures (urine, blood, respiratory) with AST results in which at least one isolate is *E. coli*, *K. pneumoniae*, *K. oxytoca* or *P. mirabilis*. MGB 120,742 cultures from 67,185 patients; Stanford 76,244 cultures from 47,082 patients.
 
 ---
 
-## Features extracted
+## Outcome definition
 
-48 harmonized features were constructed across eight clinical domains from the ARMD EHR tables. The complete feature dictionary appears in Supplementary Table 1 of the manuscript.
-
-**Demographics** — age group, sex, Area Deprivation Index score, ADI missing flag, ADI high flag.
-
-**Comorbidities** — heart failure, liver disease, lymphoma, metastatic cancer, obesity, renal failure, Elixhauser comorbidity count.
-
-**Ward/setting** — inpatient, outpatient, emergency department.
-
-**Prior antibiotics (90-day window)** — fluoroquinolone, 3rd-generation cephalosporin, carbapenem, glycopeptide, sulfonamide, extended-spectrum penicillin, aminoglycoside exposure.
-
-**Prior resistance history** — prior ESBL-positive culture, prior ESBL on AST, prior carbapenem resistance, number of distinct prior organisms, days since prior organism, number of distinct resistant antibiotic classes.
-
-**Procedures (30-day window)** — central venous catheter, mechanical ventilation, surgical procedure, any-procedure flag.
-
-**Culture / organism** — specimen type (urine / blood / respiratory), organism genus (*E. coli*, *Klebsiella*, *Enterobacter*, *Proteus*, other).
-
-**Temporal / interaction** — days since last culture, prior-culture flag, concurrent antibiotic exposures, immunocompromised flag, invasive-procedure flag, prior ESBL with cephalosporin exposure, hospital multi-antibiotic exposure.
+Presumptive ESBL per CLSI M100 screening criteria, assigned at the isolate level: a culture is positive if any CLSI-validated isolate is Intermediate or Resistant to ceftriaxone, ceftazidime, aztreonam or cefpodoxime. Cefepime is not a CLSI screening agent and is not used. Cefotaxime is excluded because ARMD-MGB reports it with a "≤2 µg/mL" panel floor that the CLSI-2022 re-interpretation maps to Intermediate. At MGB, non-susceptibility is read from the CLSI-2022 re-interpretation supplied with ARMD wherever a measured value exists; where the laboratory reported only a category with no measured value (the CLSI-2022 field is blank), the laboratory-reported category is used, since every breakpoint revision for these agents lowered the thresholds and a laboratory call of Intermediate or Resistant is therefore also non-susceptible under the 2022 criteria. At Stanford only laboratory-reported categories exist. Prevalence: 13.8% (MGB), 9.2% (Stanford). Against the ESBL confirmatory test recorded for 8,166 MGB cultures the definition has PPV 0.887 and sensitivity 0.975.
 
 ---
 
-## ESBL outcome definition
+## Features
 
-ESBL-positive status was defined as phenotypic resistance to at least one third-generation cephalosporin or extended-spectrum penicillin on antibiotic susceptibility testing (AST), consistent with CLSI 2022 breakpoints. At MGB, ESBL designation used AST codes {CRO, CAZ, FEP, TZP} with `CLSI_2022_pheno = "Resistant"`. At Stanford, resistance was identified from the susceptibility field of the ARMD microbial resistance file. Natural prevalence was preserved at evaluation (MGB 14.4%, Stanford 10.4%); no resampling was applied to test sets.
+46 features in eight domains (demographics, Elixhauser comorbidities, ward, prior antibiotic exposure in 90 days, prior microbiology, procedures in 30 days, specimen and organism, temporal/interaction terms). Prior-microbiology features come from a patient-level self-join of each site's ARMD culture table (all urine, blood and respiratory cultures, positive and negative) and count only results from cultures ordered 3 to 730 days before the index culture. Note that ARMD-Stanford stores the literal string `Null` in the organism field of negative cultures; the code treats it as no organism, so negative cultures contribute to the existence and timing of prior cultures but not to prior organism counts or prior susceptibility results. Definitions are listed in Supplementary Table S1 of the manuscript and in `scripts/nb_cells/03_constants.py` and `04_builders.py`.
+
+---
+
+## Analysis design
+
+- Each site is split once by patient into 64% training, 8% model selection, 8% calibration and 20% held-out test.
+- Zero-shot: train on the source training split, evaluate on the whole target site.
+- Transfer sweep: fine-tune on n ∈ {500, 1000, 2000, 5000} target cultures drawn from the target training split, ten random draws per budget, three seeds at the full budget; XGBoost from scratch and warm-started on the same cultures; source forgetting on the source test split.
+- Permutation importance on the source test split; top-10 and stable-feature models on identical splits.
+- Patient-cluster bootstrap (2,000 replicates) for every confidence interval; paired differences use identical resamples.
+- Operating threshold at 90% sensitivity chosen on the source calibration split and applied unchanged to the target.
 
 ---
 
@@ -122,124 +108,45 @@ ESBL-positive status was defined as phenotypic resistance to at least one third-
 
 ```
 esbl_amr/
-│
-├── README.md
-├── LICENSE
+├── cross_site_esbl_prediction.ipynb   # full pipeline with outputs
+├── figures/                           # manuscript figures written by the notebook
 ├── requirements.txt
-├── cross_site_esbl.ipynb          # Main analysis notebook (with outputs)
-│
-└── figures/
-    ├── fig1a_mgb_to_stanford.png
-    ├── fig1b_stanford_to_mgb.png
-    ├── multimodel_transfer.png
-    ├── ftt_importance_m2s.png
-    ├── ftt_importance_s2m.png
-    ├── suppfig1_xgb_vs_ftt_importance.png
-    ├── suppfig2_calibration.png
-    ├── suppfig3_subgroups.png
-    ├── suppfig4a_10feat_m2s.png
-    └── suppfig4b_10feat_s2m.png
+├── LICENSE
+└── README.md
 ```
-
-The notebook is committed with all cell outputs intact (executed on an RTX 3090, 24 GB VRAM) and contains:
-
-- MGB and Stanford feature engineering (48 harmonized features, 8 clinical domains).
-- Bidirectional zero-shot external validation for all 7 models at natural prevalence.
-- Multi-model fine-tuning sweep (*n* = 0, 500, 1K, 2K, 5K, ALL) with source-site forgetting analysis.
-- FTT-DANN domain-adversarial training and variance characterization. (See Methods §Training Protocol in the manuscript for the rationale on running the DANN fine-tuning sweep in the MGB→Stanford direction only.)
-- TabPFN v2.6 zero-shot and context-window data efficiency sweep.
-- FTT permutation importance (bidirectional, 5 repeats per feature).
-- Direction-specific 10-feature experiments.
-- Subgroup analysis (age, sex, ADI, prior ESBL history).
-- Clinical operating point at 90% sensitivity (bidirectional).
-- All main and supplementary figures.
-
-Notebook outputs are included to support reproducibility verification without requiring dataset access.
 
 ---
 
 ## Environment setup
 
-**System requirements**
-- Python 3.9 or newer.
-- PyTorch 2.0+ with CUDA support.
-- NVIDIA GPU recommended. Experiments were run on an RTX 3090 (24 GB VRAM); full notebook execution takes approximately 6–8 hours end-to-end on this hardware. CPU-only execution is possible but is not recommended (estimated > 48 h, dominated by FTT fine-tuning sweeps and TabPFN inference).
-
-**Installation**
+Python 3.9 with CUDA; the reported run used one NVIDIA RTX 3090 (24 GB), PyTorch 2.8.0 and XGBoost 2.1.4.
 
 ```bash
-git clone https://github.com/iupui-soic/esbl_amr.git
-cd esbl_amr
 pip install -r requirements.txt
 ```
 
-A minimal pinned `requirements.txt`:
-
-```
-torch==2.3.*
-scikit-learn==1.4.*
-xgboost==2.0.*
-optuna==3.6.*
-tabpfn==2.6.*
-pandas==2.2.*
-numpy==1.26.*
-matplotlib==3.8.*
-seaborn==0.13.*
-jupyter==1.0.*
-```
-
-CUDA 12.1 was used for the reference run; adjust the `torch` extra-index accordingly for other CUDA versions.
-
-**TabPFN authentication token**
-
-TabPFN v2.6 requires a free authentication token from https://ux.priorlabs.ai. Set it as an environment variable before launching Jupyter:
-
-```bash
-export TABPFN_TOKEN="YOUR_TABPFN_TOKEN_HERE"
-```
-
-or within the notebook:
-
-```python
-import os
-os.environ["TABPFN_TOKEN"] = "YOUR_TABPFN_TOKEN_HERE"
-```
+TabPFN 2.6 weights require a free PriorLabs licence token: accept the licence at https://ux.priorlabs.ai (License tab) and either export `TABPFN_TOKEN=<token>` or put `TABPFN_TOKEN=<token>` in a `.env` file next to the notebook. Without a token the notebook skips TabPFN and continues.
 
 ---
 
 ## Reproducing results
 
-All results are reproducible from a single notebook execution with `SEED = 42`:
+Run the notebook with papermill (recommended; the two parameters are in the first code cell):
 
 ```bash
-# Interactive
-jupyter notebook cross_site_esbl.ipynb
+# 10-minute end-to-end test on a 5 % patient subsample
+papermill cross_site_esbl_prediction.ipynb smoke.ipynb -p SMOKE 1 -p RESUME 0
 
-# Non-interactive (full pipeline)
-jupyter nbconvert --to notebook --execute cross_site_esbl.ipynb --output cross_site_esbl_executed.ipynb
+# full run (about 2.5 hours on an RTX 3090); RESUME=1 continues from checkpoints
+papermill cross_site_esbl_prediction.ipynb run.ipynb -p SMOKE 0 -p RESUME 1 --log-output
 ```
 
-**Sanity check.** After the cross-site zero-shot block (the second results section in the notebook), the printed AUROC summary table should match Table 2 of the manuscript to within ±0.005 AUROC for deterministic models (LR, XGBoost, TabPFN) and within ±0.011 AUROC for the neural models (FTT, MHCA-VAE, DA-VAE). FTT-DANN zero-shot is the documented exception and is expected to vary by up to ±0.04 AUROC across runs.
+Outputs are written to `cross_site_outputs/`: `results/results.json` (every number in the manuscript), `results/*.tex` (table bodies), `preds/` (saved predictions) and `ckpt/` (model states and splits). Figures are written under the manuscript file names into `figures/`.
 
-**Key design decisions** (documented in the notebook):
-- Patient-level splits (`GroupShuffleSplit`) prevent data leakage across training and test sets.
-- `StandardScaler` is fit on source training data only — never on target data.
-- RNG state is reset before each major experiment block.
+Seed 42 is used throughout and every training call is seeded from its stage, direction, model, budget and draw; GPU kernels are not bit-wise deterministic, so re-executions reproduce results to within the seed variability reported in Supplementary Table S8.
 
 ---
 
 ## License and citation
 
-**License.** Code in this repository is released under the MIT License (see `LICENSE`). Figures are released under CC-BY-4.0. The ARMD datasets are governed by their respective data use agreements and are *not* covered by this license.
-
-**Citing the paper:**
-
-> Kudamala, R., Kuruvikkattil, A.V., Gichoya, J.W. & Purkayastha, S. Bidirectional cross-site transfer learning for prediction of extended-spectrum beta-lactamase-producing Enterobacterales from electronic health records. *npj Digit. Med.* (under review, 2026).
-
-A DOI will be added here on acceptance.
-
-**Citing the code (separate from the paper).** A versioned software release will be archived on Zenodo at acceptance and the DOI listed here. Until then, please cite this repository by its GitHub URL and commit hash:
-
-> Kudamala, R. *et al.* `esbl_amr` (version 1.0.0). GitHub. https://github.com/iupui-soic/esbl_amr
-
-Reporting follows the [TRIPOD+AI](https://doi.org/10.1136/bmj-2023-078378) statement.
+Code is released under the MIT License (see `LICENSE`). If you use this code, please cite the manuscript above.
